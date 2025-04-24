@@ -5,11 +5,30 @@ import { upperFirst } from "lodash";
 import { parseValue, stringifyValue } from "../utils/transform";
 import { isEmptyValue } from "../utils/check";
 
+const LOCAL_STORAGE_KEY = "__XXX__";
+
+const getLocalStorage = <T extends Record<string, any>>(): T | undefined => {
+  const localStorageString = localStorage.getItem(LOCAL_STORAGE_KEY) ?? "{}";
+  try {
+    return JSON.parse(localStorageString);
+  } catch (_) {
+    return undefined;
+  }
+};
+
+const setLocalStorage = <T extends Record<string, any>>(value: T) => {
+  const prevLocalStorage = getLocalStorage<T>();
+  localStorage.setItem(
+    LOCAL_STORAGE_KEY,
+    stringifyValue({ ...prevLocalStorage, ...value })
+  );
+};
+
 const getInitialState = <T extends Record<string, any>>(
   initState: T,
   params: URLSearchParams
 ): T => {
-  // 首先尝试从 URL 获取
+  // 1. 首先尝试从 URL 获取
   const urlState: Partial<T> = {};
   let hasUrlValue = false;
 
@@ -27,11 +46,14 @@ const getInitialState = <T extends Record<string, any>>(
   const localStorageState: Partial<T> = {};
   let hasLocalStorageValue = false;
 
-  for (const key in initState) {
-    const value = localStorage.getItem(key);
-    if (value !== null) {
-      localStorageState[key] = parseValue(value, initState[key]);
-      hasLocalStorageValue = true;
+  const localStorageObject = getLocalStorage<T>();
+  if (localStorageObject) {
+    for (const key in initState) {
+      const value = localStorageObject[key];
+      if (!isEmptyValue(value)) {
+        localStorageState[key] = value;
+        hasLocalStorageValue = true;
+      }
     }
   }
 
@@ -52,11 +74,6 @@ type StateKeysReturn<T> = {
   ) => void;
 };
 
-/**
- * 自定义 Hook：同步 URL 和 localStorage 的状态管理.
- * 先从 URL 查询参数中获取数据，如果没有则从 localStorage 中获取，更新时会同时同步到 URL 和 localStorage.
- * 当更新值为空（空字符串、空数组等）时，会自动从 URL 和 localStorage 中删除对应的键.
- */
 const useSyncLocalstorageAndUrl = <T extends Record<string, any>>(
   initialState: StateKeys<T>
 ): StateKeysReturn<T> => {
@@ -80,11 +97,7 @@ const useSyncLocalstorageAndUrl = <T extends Record<string, any>>(
       setSearchParams(newSearchParams, { replace: true });
 
       // 更新localStorage
-      if (isEmpty) {
-        localStorage.removeItem(key as string);
-      } else {
-        localStorage.setItem(key as string, stringifyValue(value));
-      }
+      setLocalStorage<T>(newState);
 
       return newState;
     });
