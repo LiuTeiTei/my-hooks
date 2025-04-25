@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { upperFirst } from "lodash";
 
@@ -25,22 +25,22 @@ const setLocalStorage = <T extends Record<string, any>>(value: T) => {
 };
 
 const getInitialState = <T extends Record<string, any>>(
-  initState: T,
+  initialState: T,
   params: URLSearchParams
 ): T => {
   // 1. 首先尝试从 URL 获取
   const urlState: Partial<T> = {};
   let hasUrlValue = false;
 
-  for (const key in initState) {
+  for (const key in initialState) {
     const value = params.get(key);
     if (value !== null) {
-      urlState[key] = parseValue(value, initState[key]);
+      urlState[key] = parseValue(value, initialState[key]);
       hasUrlValue = true;
     }
   }
 
-  if (hasUrlValue) return { ...initState, ...urlState };
+  if (hasUrlValue) return { ...initialState, ...urlState };
 
   // 2. 如果 URL 没有，尝试从 localStorage 获取
   const localStorageState: Partial<T> = {};
@@ -48,7 +48,7 @@ const getInitialState = <T extends Record<string, any>>(
 
   const localStorageObject = getLocalStorage<T>();
   if (localStorageObject) {
-    for (const key in initState) {
+    for (const key in initialState) {
       const value = localStorageObject[key];
       if (!isEmptyValue(value)) {
         localStorageState[key] = value;
@@ -58,8 +58,8 @@ const getInitialState = <T extends Record<string, any>>(
   }
 
   return hasLocalStorageValue
-    ? { ...initState, ...localStorageState }
-    : initState;
+    ? { ...initialState, ...localStorageState }
+    : initialState;
 };
 
 type StateKeys<T> = {
@@ -82,14 +82,35 @@ const useSyncLocalstorageAndUrl = <T extends Record<string, any>>(
     getInitialState(initialState, searchParams)
   );
 
+  // url 为空时，将 internalState 更新到 url 上
+  useEffect(() => {
+    let hasUrlValue = false;
+    for (const key in initialState) {
+      const value = searchParams.get(key);
+      if (value !== null) {
+        hasUrlValue = true;
+      }
+    }
+
+    // 遍历对象，只添加有值的属性
+    if (!isEmptyValue(internalState) && !hasUrlValue) {
+      const newSearchParams = new URLSearchParams();
+      Object.entries(internalState).forEach(([key, value]) => {
+        if (!isEmptyValue(value)) {
+          newSearchParams.append(key, String(value));
+        }
+      });
+      setSearchParams(newSearchParams, { replace: true });
+    }
+  }, [initialState, internalState, searchParams, setSearchParams]);
+
   const updateState = <K extends keyof T>(key: K, value: T[K]) => {
     setInternalState((prev) => {
       const newState = { ...prev, [key]: value };
-      const isEmpty = isEmptyValue(value);
 
       // 更新URL
       const newSearchParams = new URLSearchParams(searchParams);
-      if (isEmpty) {
+      if (isEmptyValue(value)) {
         newSearchParams.delete(key as string);
       } else {
         newSearchParams.set(key as string, stringifyValue(value));
@@ -97,7 +118,7 @@ const useSyncLocalstorageAndUrl = <T extends Record<string, any>>(
       setSearchParams(newSearchParams, { replace: true });
 
       // 更新localStorage
-      setLocalStorage<T>(newState);
+      setLocalStorage(newState);
 
       return newState;
     });
@@ -108,7 +129,7 @@ const useSyncLocalstorageAndUrl = <T extends Record<string, any>>(
     // 添加状态值
     result[key] = internalState[key];
 
-    // 添加setter方法 (set + 首字母大写的key)
+    // 添加 setter 方法 (set + 首字母大写的key)
     const setterKey = `set${upperFirst(key)}` as const;
     result[setterKey] = (value: T[typeof key]) => updateState(key, value);
   }
